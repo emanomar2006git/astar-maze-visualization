@@ -13,6 +13,7 @@ WALL_T = 4         # thickness of a wall line in pixels
 PATH_W = 34        # width of a corridor in pixels
 MARGIN = 12        # empty space around the maze
 PANEL_W = 260      # width of the side panel
+ANIM_FRAMES = 90   # about how many frames the exploring animation lasts (60 fps)
 
 WHITE = (255, 255, 255)
 WALL_COLOR = (20, 20, 20)
@@ -53,15 +54,19 @@ def is_lonely_pillar(grid, r, c):
     return True
 
 
-def draw_maze(screen, maze, result):
-    """Draw corridors, A* explored cells, final path, walls, Start and Goal."""
+def draw_maze(screen, maze, result, n_explored, n_path):
+    """
+    Draw corridors, A* explored cells, final path, walls, Start and Goal.
+    Only the first n_explored explored cells and the first n_path path cells
+    are drawn, which is what makes the search animate.
+    """
     board = (MARGIN, MARGIN, offset(maze.cols), offset(maze.rows))
     pygame.draw.rect(screen, WHITE, board)
 
     if result is not None:
-        for r, c in result["explored"]:
+        for r, c in result["explored"][:n_explored]:
             pygame.draw.rect(screen, EXPLORED_COLOR, cell_box(r, c))
-        for r, c in result["path"]:
+        for r, c in result["path"][:n_path]:
             pygame.draw.rect(screen, PATH_COLOR, cell_box(r, c))
 
     for r in range(maze.rows):
@@ -111,7 +116,7 @@ def build_buttons(x):
     return generate, run, levels
 
 
-def draw_panel(screen, font, x, maze, result):
+def draw_panel(screen, font, x, maze, result, finished):
     """Side panel texts: title, difficulty label and search statistics."""
     def put(text, y):
         screen.blit(font.render(text, True, TEXT_COLOR), (x, y))
@@ -122,6 +127,8 @@ def draw_panel(screen, font, x, maze, result):
     lines = [f"Start: {maze.start}", f"Goal: {maze.goal}", "", "Statistics"]
     if result is None:
         lines.append("Not searched yet")
+    elif not finished:
+        lines.append("Searching...")
     elif result["found"]:
         lines += ["Path found",
                   f"Path cost: {result['cost']}",
@@ -140,7 +147,9 @@ def main():
     pygame.init()
     difficulty = "medium"
     maze = generate_maze(DEFAULT_ROWS, DEFAULT_COLS, difficulty)
-    result = None      # no search has been run on this maze yet
+    result = None          # no search has been run on this maze yet
+    n_explored = 0         # how many explored cells are visible so far
+    n_path = 0             # how many path cells are visible so far
     width = 2 * MARGIN + offset(maze.cols) + PANEL_W
     height = 2 * MARGIN + offset(maze.rows)
     screen = pygame.display.set_mode((width, height))
@@ -152,9 +161,9 @@ def main():
 
     def new_maze():
         """Generate a fresh maze and clear every trace of the previous search."""
-        nonlocal maze, result
+        nonlocal maze, result, n_explored, n_path
         maze = generate_maze(maze.cell_rows, maze.cell_cols, difficulty, previous=maze)
-        result = None
+        result, n_explored, n_path = None, 0, 0
 
     running = True
     while running:
@@ -164,16 +173,28 @@ def main():
             elif generate_btn.clicked(event):
                 new_maze()
             elif run_btn.clicked(event):
+                # run A* now, then reveal its work step by step
                 result = astar(maze.grid, maze.start, maze.goal)
+                n_explored, n_path = 0, 0
             else:
                 for name, button in level_btns.items():
                     if button.clicked(event) and name != difficulty:
                         difficulty = name      # changing difficulty = new maze
                         new_maze()
 
+        # Animation: first reveal explored cells, then the final path.
+        finished = True
+        if result is not None:
+            total_e, total_p = len(result["explored"]), len(result["path"])
+            if n_explored < total_e:
+                n_explored = min(total_e, n_explored + max(1, -(-total_e // ANIM_FRAMES)))
+            elif n_path < total_p:
+                n_path = min(total_p, n_path + max(1, -(-total_p // (ANIM_FRAMES // 3))))
+            finished = n_explored >= total_e and n_path >= total_p
+
         screen.fill(PANEL_BG)
-        draw_maze(screen, maze, result)
-        draw_panel(screen, font, panel_x, maze, result)
+        draw_maze(screen, maze, result, n_explored, n_path)
+        draw_panel(screen, font, panel_x, maze, result, finished)
         mouse = pygame.mouse.get_pos()
         generate_btn.draw(screen, font, mouse)
         run_btn.draw(screen, font, mouse)
